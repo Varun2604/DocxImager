@@ -9,6 +9,20 @@ const uuid = require('uuid/v4');
 const IMAGE_URI = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
 const IMAGE_TYPE = 'image/png';
 
+const IMAGE_RETRIEVAL_TYPE = {
+   'URL' : 'url',
+   'LOCAL' : 'local',
+    'B64' : 'b64'
+};
+
+const TYPE = 'type';
+const HEIGHT = 'height';
+const WIDTH = 'width';
+const NAME = 'name';
+const BUFFER = 'buffer';
+const PATH = 'path';
+const REL_ID = 'rel_id';
+
 //1. replace image - the template image will be given in the docx, take the url/base64 for the new image in the argument, along with the image no.
 //2. insert image - use replace tags {{insert_image `variable_name` height width}}, and take variable_name in the arguments.
 
@@ -66,33 +80,136 @@ class DocxImager {
     }
 
     // {{insert_image variable_name type width height }} + {variable_name : "image_url"}
-    //context - dict of variable_name vs url/b64 data
-    async __insertImage(context, width, height, type, callback){
+    //context - dict of variable_name vs url
+    async insertImage(context, callback){
+        // a. get the list of all variables.
+        let variables = await this.__getVariableNames();
+
+        //b. download/retrieve images.
+        let final_context = await this.__getImages(variables, context);
+
+        //deep merge image buffer/name and meta.
+        for(let var_name in final_context){
+            if(final_context.hasOwnProperty(var_name)){
+                final_context[var_name][TYPE] = variables[var_name][TYPE];
+                final_context[var_name][HEIGHT] = variables[var_name][HEIGHT];
+                final_context[var_name][WIDTH] = variables[var_name][WIDTH];
+            }
+        }
+
         //1. insert entry in [Content-Type].xml
-        await this._addContentType(type);
+        await this._addContentType(final_context);
 
         //2. write image in media folder in word/
-        let image_path = await this._addImage(buffer);
+        /*let image_path = */await this._addImage(final_context);
+
         //3. insert entry in /word/_rels/document.xml.rels
         //<Relationship Id="rId3" Type=IMAGE_URI Target="media/image2.png"/>
-        let rel_id = await this._addRelationship(image_path);
+        /*let rel_id = */await this._addRelationship(final_context);
+
         //4. insert in document.xml after calculating EMU.
-        await this._addInDocumentXML(rel_id, height, width);
+        await this._addInDocumentXML(final_context);
         // http://polymathprogrammer.com/2009/10/22/english-metric-units-and-open-xml/
         // https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
 
     }
 
-    async _addContentType() {
+    async __getVariableNames(){
         return new Promise(async (res, rej)=>{
             try{
-                let content = await this.docx.file('[Content_Types].xml').async('nodebuffer');
+                let content = await this.zip.file('word/document.xml').async('nodebuffer');
+                content = content.toString();
+                content = DocxImager.__cleanXML(content);
+                let matches = content.match(/(<w:p>.*?insert_image.*?<\/w:p>)/g);         //match all r tags
+                if(matches && matches.length){
+                    let variables = {};
+                    for(let i = 0; i < matches.length; i++){
+                        let tag = matches[i].match(/{{(.*?)}}/g)[0];
+                        tag = tag.replace('<\/w:t>.*?<w:t>', '');
+                        let splits = tag.split(' ');
+                        let node = {};
+                        // node['variable_name'] = splits[1];
+                        node[TYPE] = splits[2];
+                        node[WIDTH] = splits[3];
+                        node[HEIGHT] = splits[4];
+                        variables[splits[1]] = node;
+                    }
+                    res(variables);
+                }else{
+                    rej(new Error('Invalid Docx'));
+                }
+            }catch(e){
+                console.log(e);
+                rej(e);
+            }
+        });
+    }
+
+    async __getImages(variables, context){
+        return new Promise(async (res, rej)=>{
+            try{
+                let image_map = {};
+                for(let variable_name in variables){
+                    if(variables.hasOwnProperty(variable_name)){
+                        let path = context[variable_name];
+                        //TODO assuming the path is the url, also check for local/b64.
+                        let buffer = await this.__getImageBuffer(path, IMAGE_RETRIEVAL_TYPE.URL);
+                        let name = uuid()+'.'+variables[variable_name][TYPE];
+                        image_map[variable_name] = {};
+                        image_map[variable_name][NAME] = name;
+                        image_map[variable_name][BUFFER] = buffer;
+                    }
+                }
+                res(image_map);
+            }catch(e){
+                console.log(e);
+                rej(e);
+            }
+        })
+    }
+
+    async __getImageBuffer(path, retrieval_type){
+        return new Promise((res, rej)=>{
+            try{
+                if(retrieval_type === IMAGE_RETRIEVAL_TYPE.URL){
+                    let req = https.request(path, (result) => {
+                        let buffer = [];
+                        result.on('data', (d) => {
+                            buffer.push(d);
+                        });
+                        result.on('end', ()=>{
+                            res(Buffer.concat(buffer));
+                        });
+                    });
+                    req.on('error', (e) => {
+                        throw e;
+                    });
+                    req.end();
+                }
+            }catch(e){
+                console.log(e);
+                rej(e);
+            }
+        })
+    }
+
+    async _addContentType(final_context) {
+        return new Promise(async (res, rej)=>{
+            try{
+                let content = await this.zip.file('[Content_Types].xml').async('nodebuffer');
+                content = content.toString();
                 let matches = content.match(/<Types.*?>.*/gm);
                 if (matches && matches[0]) {
-                    let new_str = matches[0] + '<Default Extension="' + type + '" ContentType="image/' + type + '"/>'
-                    content = content.replace(matches[0], new_str);
+                    // let new_str = matches[0] + '<Default Extension="' + type + '" ContentType="image/' + type + '"/>'
+                    let new_str = '';
+                    for(let var_name in final_context){
+                        if(final_context.hasOwnProperty(var_name)){
+                            new_str += '<Override PartName="/word/media/'+final_context[var_name][NAME]+'" ContentType="'+final_context[var_name][TYPE]+'"/>';
+                        }
+                    }
+                    content = matches[0]+new_str;
 
-                    this.docx.file('[Content_Types].xml', content);
+                    this.zip.file('[Content_Types].xml', content);
                     res(true);
                 }
             }catch(e){
@@ -102,13 +219,22 @@ class DocxImager {
         })
     }
 
-    async _addImage(image_buffer){
+    async _addImage(final_context){
         return new Promise(async (res, rej)=>{
             try{
-                let image_name = uuid();
-                let image_path = 'media/'+image_name;
-                this.docx.file('word/'+image_path, image_buffer);
-                res(image_path);
+                // let image_name = uuid();
+                // let image_path = 'media/'+image_name;
+                // this.docx.file('word/'+image_path, image_buffer);
+                // res(image_path);
+                for(let var_name in final_context){
+                    if(final_context.hasOwnProperty(var_name)){
+                        let o = final_context[var_name];
+                        let img_path = 'media/'+o[NAME];
+                        o[PATH] = img_path;
+                        this.zip.file('word/'+img_path, o[BUFFER]);
+                    }
+                }
+                res(true);
             }catch(e){
                 console.log(e);
                 rej(e);
@@ -116,31 +242,43 @@ class DocxImager {
         })
     }
 
-    async _addRelationship(image_path){
+    async _addRelationship(final_context){
         return new Promise(
-            async function(res, rej){
-
+            async (res, rej)=>{
                 try{
-                    let content = await this.docx.file('word/_rels/document.xml.rels').async('nodebuffer');
-                    parseString(content.toString(), function(err, relation){
+                    let content = await this.zip.file('word/_rels/document.xml.rels').async('nodebuffer');
+                    parseString(content.toString(), (err, relation)=>{
                         if(err){
                             console.log(err);       //TODO check if an error thrown will be catched by enclosed try catch
                             rej(err);
-                            return;
                         }
                         let cnt = relation.Relationships.Relationship.length;
-                        let rID = 'rId'+(cnt+1);
-                        relation.Relationships.Relationship.push({
-                            $ : {
-                                Id : rID,
-                                Type : IMAGE_URI,
-                                Target : image_path
+                        // let rID = 'rId'+(cnt+1);
+                        // relation.Relationships.Relationship.push({
+                        //     $ : {
+                        //         Id : rID,
+                        //         Type : IMAGE_URI,
+                        //         Target : image_path
+                        //     }
+                        // });
+                        for(let var_name in final_context){
+                            if(final_context.hasOwnProperty(var_name)){
+                                let o = final_context[var_name];
+                                let rel_id = 'rID'+(cnt++);
+                                o[REL_ID] = rel_id;
+                                relation.Relationships.Relationship.push({
+                                    $ : {
+                                        Id : rel_id,
+                                        Type : IMAGE_URI,
+                                        Target : o[PATH]
+                                    }
+                                });
                             }
-                        });
+                        }
                         let builder = new Builder();
                         let modifiedXML = builder.buildObject(relation);
-                        docx.file('word/_rels/document.xml.rels', modifiedXML);
-                        res(rID);
+                        this.zip.file('word/_rels/document.xml.rels', modifiedXML);
+                        res(true);
                     });
                 }catch(e){
                     console.log(e);
@@ -149,12 +287,78 @@ class DocxImager {
             });
     }
 
-    async _addInDocumentXML(rId, height, width){
+    async _addInDocumentXML(final_context){
 
+        return new Promise(async (res, rej)=>{
+            try{
+                let content = await this.zip.file('word/document.xml').async('nodebuffer');
+                content = content.toString();
+
+                content = DocxImager.__cleanXML(content);
+                let matches = content.match(/(<w:p>.*?insert_image.*?<\/w:p>)/g);         //match all p tags containing
+                console.log(matches);
+                if(matches && matches[0]){
+                    let tag = matches[0].match(/{{(.*?)}}/g)[0];
+                    tag = tag.replace('<\/w:t>.*?<w:t>', '');
+                    tag = tag.replace('\'', '');
+                    let splits = tag.split(' ');
+                    let var_name = splits[1];
+                    let width = splits[2];
+                    let height = splits[3];
+
+                    let obj = final_context[var_name];
+                    console.log(obj);
+                    let xml = DocxImager.__getImgXMLElement(obj[REL_ID], height, width);
+                    //TODO replace the <r> with the given xml
+                    res(true);
+                }else{
+                    rej(new Error('Invalid Docx'));
+                }
+            }catch(e){
+                console.log(e);
+                rej(e);
+            }
+        });
+
+    }
+
+    static __cleanXML(xml){
+
+        //Simple variable match
+        //({{|{(.*?){)(.*?)(}{1,2})(.*?)(?:[^}])(}{1})
+        //1. ({{|{(.*?){)   - Match {{ or {<xmltgas...>{{
+        //2. (.*?)          -   Match any character
+        //3. (}}|}         -   Match } or }}
+        //4. (.*?)          -   Match any character
+        //5. (?:[^}])       -   KILLER: Stop matching
+        //6. }               -   Include the Killer match
+        let variable_regex = /({{|{(.*?){)(.*?)(}}|}(.*?)(?:[^}])})/g;
+        let replacements = xml.match(variable_regex);
+
+        // let replacements = xml.match(/({{#|{{#\/s)(?:(?!}}).)*|({{|{(.*?){)(?:(?!}}).)*|({{(.*?)#|{{#\/s)(?:(?!}}).)*/g);
+        // let replacements = xml.match(/({{#|{{#\/s)(?:([^}}]).)*|({{|{(.*?){)(?:([^}}]).)*|({{(.*?)#|{{#\/s)(?:([^}}]).)*/g);
+        // let replacements = xml.match(/({{#|{{#\/s)(?:(?!}}).)*|{{(?:(?!}}).)*|({{(.*?)#|{{(.*?)#\/s)(?:(?!}}).)*|{(.*?){(?:(?!}}).)*/g);//|({(.*?){(.*?)#|{{#\/s)(?:(?!}}).)*
+        // let replacements = xml.match(/({(.*?){#|{(.*?){#\/s)(?:(?!}(.*?)}).)*|{(.*?){(?:(?!}(.*?)}).)*/g);
+        let replaced_text;
+        if(replacements){
+            for(let i = 0; i < replacements.length; i++){
+                replaced_text = replacements[i].replace(/<\/w:t>.*?(<w:t>|<w:t [^>]*>)/g, '');
+                xml = xml.replace(replacements[i], replaced_text);
+            }
+        }
+        xml = xml.replace(/&quot;/g, '"');
+        xml = xml.replace(/&gt;/g, '>');
+        xml = xml.replace(/&lt;/g, '<');
+        // xml = xml.replace(/&amp;/g, '&');
+        xml = xml.replace(/&apos;/g, '\'');
+
+        return xml;
+    }
+
+    static __getImgXMLElement(rId, height, width){
         let calc_height = 9525 * height;
         let calc_width = 9525 * width;
-
-        var xml_ele =
+       return '<w:r>'+
                 '<w:rPr>' +
                     '<w:noProof/>' +
                 '</w:rPr>' +
@@ -176,17 +380,17 @@ class DocxImager {
                                         '</pic:cNvPicPr>' +
                                     '</pic:nvPicPr>' +
                                     '<pic:blipFill>' +
-                                        '<a:blip r:embed="'+rId+'">' +
-                                            '<a:extLst>' +
-                                                '<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C2}">' +
-                                                    '<a14:useLocalDpi val="0"/>' +
-                                                '</a:ext>' +
-                                            '</a:extLst>' +
-                                        '</a:blip>' +
-                                        '<a:srcRect/>' +
-                                        '<a:stretch>' +
-                                            '<a:fillRect/>' +
-                                        '</a:stretch>' +
+                                    '<a:blip r:embed="'+rId+'">' +
+                                        '<a:extLst>' +
+                                            '<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C2}">' +
+                                                '<a14:useLocalDpi val="0"/>' +
+                                            '</a:ext>' +
+                                        '</a:extLst>' +
+                                    '</a:blip>' +
+                                    '<a:srcRect/>' +
+                                    '<a:stretch>' +
+                                        '<a:fillRect/>' +
+                                    '</a:stretch>' +
                                     '</pic:blipFill>' +
                                     '<pic:spPr bwMode="auto">' +
                                         '<a:xfrm>' +
@@ -205,34 +409,8 @@ class DocxImager {
                             '</a:graphicData>' +
                         '</a:graphic>' +
                     '</wp:inline>' +
-                '</w:drawing>';
-
-        return new Promise(async (res, rej)=>{
-            try{
-                let content = await this.docx.file('word/document.xml').async('nodebuffer');
-                let matches = content.match(/(<w:p>.*?insert_image.*?<\/w:p>)/g);         //match all r tags
-                if(matches && matches[0]){
-                    let tag = matches[0].matches(/{{(.*?)}}/g)[0];
-                    tag = tag.replace('<\/w:t>.*?<w:t>', '');
-                    tag = tag.replace('\'', '');
-                    let splits = tag.split(' ');
-                    let href = splits[0];
-                    let width = splits[1];
-                    let height = splits[2];
-                    res(true);
-                }else{
-                    rej(new Error('Invalid Docx'));
-                }
-            }catch(e){
-                console.log(e);
-                rej(e);
-            }
-        });
-
-    }
-
-    __getXMLElement(){
-
+                '</w:drawing>'+
+            '</w:r>';
     }
 
     __validateDocx(){
@@ -240,6 +418,43 @@ class DocxImager {
             throw new Error('Invalid docx path or format. Please reinitialise instance.')
         }
     }
+
+    //idml functi8on
+
+    async merge(idml_path, context, merged_file_path){
+        return new Promise(async (res, rej)=>{
+
+            let zip = await zip.loadAsync(fs.readFileSync(idml_path));
+
+            //get all the file names that are to be merged.
+            let des_map = await zip.file('designmap.xml').async('nodebuffer').toString();
+
+            let regex = new RegExp(/<idPkg:Story src="(.*?)".?\/>/gm);
+            let m = regex.exec(des_map);
+            let rels = [];
+            while(m != null){
+                rels.push(m[1]);
+                m = regex.exec(des_map);
+            }
+            if(rels && rels.length > 0){
+                for(let i = 0; i < rels.length; i++){
+                    let content = await zip.file(rels[i]).async('nodebuffer').toString();
+                    content = Handlebars.compile(content)(context);
+                    zip.file(rels[i], content);
+                }
+
+                zip.generateNodeStream({streamFiles : true})
+                    .pipe(fs.createWriteStream(merged_file_path))
+                    .on('finish', function(x){
+                        res(true);
+                    });
+            }else{
+                rej(new Error('IDML file does not contain any story file'));
+            }
+
+        });
+    }
 }
+
 
 module.exports = DocxImager;
