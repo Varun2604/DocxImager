@@ -41,12 +41,13 @@ class DocxImager {
 
     replaceWithImageURL(image_uri, image_id, type, cbk){
         this.__validateDocx();
-        let req3 = https.request('https://upload.wikimedia.org/wikipedia/commons/b/bf/Test_card.png', (res) => {
+        let req3 = https.request(image_uri, (res) => {
             let buffer = [];
             res.on('data', (d) => {
                 buffer.push(d);
             });
             res.on('end', ()=>{
+                fs.writeFileSync('t1.png', );
                 this.__replaceImage(Buffer.concat(buffer), image_id, type, cbk);
             });
         });
@@ -72,16 +73,16 @@ class DocxImager {
         //1. replace the image
         let path = 'word/media/image'+image_id+'.'+type;
         this.zip.file(path, buffer);
-        this.zip.generateNodeStream({streamFiles : true})
-            .pipe(fs.createWriteStream('./merged.docx'))
-            .on('finish', function(x){
-                cbk();
-            });
+        // this.zip.generateNodeStream({streamFiles : true})
+        //     .pipe(fs.createWriteStream('./merged.docx'))
+        //     .on('finish', function(x){
+        //         cbk();
+        //     });
     }
 
     // {{insert_image variable_name type width height }} + {variable_name : "image_url"}
     //context - dict of variable_name vs url
-    async insertImage(context, callback){
+    async insertImage(context){
         // a. get the list of all variables.
         let variables = await this.__getVariableNames();
 
@@ -109,9 +110,28 @@ class DocxImager {
 
         //4. insert in document.xml after calculating EMU.
         await this._addInDocumentXML(final_context);
+
+        // this.zip.generateNodeStream({streamFiles : true})
+        //     .pipe(fs.createWriteStream('./merged.docx'))
+        //     .on('finish', function(x){
+        //         callback();
+        //     });
         // http://polymathprogrammer.com/2009/10/22/english-metric-units-and-open-xml/
         // https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
 
+    }
+
+    async save(op_file_name){
+        if(!op_file_name){
+            op_file_name = './merged.docx';
+        }
+        return new Promise(async(res, rej)=>{
+            this.zip.generateNodeStream({streamFiles : true})
+                .pipe(fs.createWriteStream(op_file_name))
+                .on('finish', function(x){
+                    res();
+                });
+        });
     }
 
     async __getVariableNames(){
@@ -120,12 +140,11 @@ class DocxImager {
                 let content = await this.zip.file('word/document.xml').async('nodebuffer');
                 content = content.toString();
                 content = DocxImager.__cleanXML(content);
-                let matches = content.match(/(<w:p>.*?insert_image.*?<\/w:p>)/g);         //match all r tags
+                let matches = content.match(/(<w:r>.*?insert_image.*?<\/w:r>)/g);         //match all r tags
                 if(matches && matches.length){
                     let variables = {};
                     for(let i = 0; i < matches.length; i++){
                         let tag = matches[i].match(/{{(.*?)}}/g)[0];
-                        tag = tag.replace('<\/w:t>.*?<w:t>', '');
                         let splits = tag.split(' ');
                         let node = {};
                         // node['variable_name'] = splits[1];
@@ -154,7 +173,7 @@ class DocxImager {
                         let path = context[variable_name];
                         //TODO assuming the path is the url, also check for local/b64.
                         let buffer = await this.__getImageBuffer(path, IMAGE_RETRIEVAL_TYPE.URL);
-                        let name = uuid()+'.'+variables[variable_name][TYPE];
+                        let name = 'image1'+'.'+variables[variable_name][TYPE];
                         image_map[variable_name] = {};
                         image_map[variable_name][NAME] = name;
                         image_map[variable_name][BUFFER] = buffer;
@@ -207,9 +226,8 @@ class DocxImager {
                             new_str += '<Override PartName="/word/media/'+final_context[var_name][NAME]+'" ContentType="'+final_context[var_name][TYPE]+'"/>';
                         }
                     }
-                    content = matches[0]+new_str;
-
-                    this.zip.file('[Content_Types].xml', content);
+                    let c = matches[0]+new_str;
+                    this.zip.file('[Content_Types].xml', content.replace(matches[0], c));
                     res(true);
                 }
             }catch(e){
@@ -264,7 +282,7 @@ class DocxImager {
                         for(let var_name in final_context){
                             if(final_context.hasOwnProperty(var_name)){
                                 let o = final_context[var_name];
-                                let rel_id = 'rID'+(cnt++);
+                                let rel_id = 'rId'+(++cnt);
                                 o[REL_ID] = rel_id;
                                 relation.Relationships.Relationship.push({
                                     $ : {
@@ -295,21 +313,20 @@ class DocxImager {
                 content = content.toString();
 
                 content = DocxImager.__cleanXML(content);
-                let matches = content.match(/(<w:p>.*?insert_image.*?<\/w:p>)/g);         //match all p tags containing
-                console.log(matches);
+                let matches = content.match(/(<w:r>.*?insert_image.*?<\/w:r>)/g);         //match all runs in p tags containing
+                //TODO iterate through all matches to match more than one tag
                 if(matches && matches[0]){
                     let tag = matches[0].match(/{{(.*?)}}/g)[0];
-                    tag = tag.replace('<\/w:t>.*?<w:t>', '');
-                    tag = tag.replace('\'', '');
                     let splits = tag.split(' ');
                     let var_name = splits[1];
                     let width = splits[2];
                     let height = splits[3];
 
                     let obj = final_context[var_name];
-                    console.log(obj);
                     let xml = DocxImager.__getImgXMLElement(obj[REL_ID], height, width);
-                    //TODO replace the <r> with the given xml
+
+                    content = content.replace(matches[0], xml);
+                    this.zip.file('word/document.xml', content);
                     res(true);
                 }else{
                     rej(new Error('Invalid Docx'));
@@ -356,8 +373,10 @@ class DocxImager {
     }
 
     static __getImgXMLElement(rId, height, width){
-        let calc_height = 9525 * height;
-        let calc_width = 9525 * width;
+        let calc_height = 951710;//9525 * height;
+        let calc_width = 2855130;//9525 * width;
+
+        // from web merge
        return '<w:r>'+
                 '<w:rPr>' +
                     '<w:noProof/>' +
@@ -367,12 +386,15 @@ class DocxImager {
                         '<wp:extent cx="'+calc_width+'" cy="'+calc_height+'"/>' +
                         '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
                         '<wp:docPr id="1402" name="Picture" descr=""/>' +
+                        // '<wp:cNvGraphicFramePr>' +
+                        //     '<a:graphicFrameLocks noChangeAspect="1"/>' +
+                        // '</wp:cNvGraphicFramePr>' +
                         '<wp:cNvGraphicFramePr>' +
-                            '<a:graphicFrameLocks noChangeAspect="1"/>' +
-                        '</wp:cNvGraphicFramePr>' +
-                        '<a:graphic>' +
+                            '<a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>'+
+                        '</wp:cNvGraphicFramePr>'+
+                        '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
                             '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
-                                '<pic:pic>' +
+                                '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
                                     '<pic:nvPicPr>' +
                                         '<pic:cNvPr id="1" name="Picture" descr=""/>' +
                                         '<pic:cNvPicPr>' +
@@ -381,11 +403,11 @@ class DocxImager {
                                     '</pic:nvPicPr>' +
                                     '<pic:blipFill>' +
                                     '<a:blip r:embed="'+rId+'">' +
-                                        '<a:extLst>' +
-                                            '<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C2}">' +
-                                                '<a14:useLocalDpi val="0"/>' +
-                                            '</a:ext>' +
-                                        '</a:extLst>' +
+                                        // '<a:extLst>' +
+                                        //     '<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C2}">' +
+                                        //         '<a14:useLocalDpi val="0"/>' +
+                                        //     '</a:ext>' +
+                                        // '</a:extLst>' +
                                     '</a:blip>' +
                                     '<a:srcRect/>' +
                                     '<a:stretch>' +
@@ -411,6 +433,56 @@ class DocxImager {
                     '</wp:inline>' +
                 '</w:drawing>'+
             '</w:r>';
+
+        // from docx
+        // return  '<w:r>' +
+        //         '<w:rPr/>' +
+        //             '<w:drawing>' +
+        //                 '<wp:anchor behindDoc="0" distT="0" distB="0" distL="0" distR="0" simplePos="0" locked="0" layoutInCell="1" allowOverlap="0" relativeHeight="2">' +
+        //                     '<wp:simplePos x="0" y="0"/>' +
+        //                     '<wp:positionH relativeFrom="column">' +
+        //                         '<wp:align>center</wp:align>' +
+        //                     '</wp:positionH>' +
+        //                     '<wp:positionV relativeFrom="paragraph">' +
+        //                         '<wp:posOffset>635</wp:posOffset>' +
+        //                     '</wp:positionV>' +
+        //                     '<wp:extent cx="5779770" cy="5396865"/>' +
+        //                     '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
+        //                     '<wp:wrapSquare wrapText="largest"/>' +
+        //                     '<wp:docPr id="1" name="Image1" descr=""/>' +
+        //                     '<wp:cNvGraphicFramePr>' +
+        //                         '<a:graphicFrameLocks noChangeAspect="1"/>' +
+        //                     '</wp:cNvGraphicFramePr>' +
+        //                     '<a:graphic>' +
+        //                         '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+        //                             '<pic:pic>' +
+        //                                 '<pic:nvPicPr>' +
+        //                                     '<pic:cNvPr id="1" name="Image1" descr=""/>' +
+        //                                     '<pic:cNvPicPr>' +
+        //                                         '<a:picLocks noChangeAspect="1" noChangeArrowheads="1"/>' +
+        //                                     '</pic:cNvPicPr>' +
+        //                                 '</pic:nvPicPr>' +
+        //                                 '<pic:blipFill>' +
+        //                                     '<a:blip r:embed="rId2"/>' +
+        //                                     '<a:stretch>' +
+        //                                         '<a:fillRect/>' +
+        //                                     '</a:stretch>' +
+        //                                 '</pic:blipFill>' +
+        //                                 '<pic:spPr bwMode="auto">' +
+        //                                     '<a:xfrm>' +
+        //                                         '<a:off x="0" y="0"/>' +
+        //                                         '<a:ext cx="5779770" cy="5396865"/>' +
+        //                                     '</a:xfrm>' +
+        //                                     '<a:prstGeom prst="rect">' +
+        //                                         '<a:avLst/>' +
+        //                                     '</a:prstGeom>' +
+        //                                 '</pic:spPr>' +
+        //                             '</pic:pic>' +
+        //                         '</a:graphicData>' +
+        //                     '</a:graphic>' +
+        //                 '</wp:anchor>' +
+        //             '</w:drawing>' +
+        //         '</w:r>';
     }
 
     __validateDocx(){
