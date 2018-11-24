@@ -28,8 +28,12 @@ const REL_ID = 'rel_id';
 
 class DocxImager {
 
-    constructor(docx_path){
-        this.__loadDocx(docx_path).catch((e)=>{
+    constructor(){
+        this.zip = null;
+    }
+
+    async load(docx_path){
+        return  this.__loadDocx(docx_path).catch((e)=>{
             console.log(e);
         });
     }
@@ -73,11 +77,6 @@ class DocxImager {
         //1. replace the image
         let path = 'word/media/image'+image_id+'.'+type;
         this.zip.file(path, buffer);
-        // this.zip.generateNodeStream({streamFiles : true})
-        //     .pipe(fs.createWriteStream('./merged.docx'))
-        //     .on('finish', function(x){
-        //         cbk();
-        //     });
     }
 
     // {{insert_image variable_name type width height }} + {variable_name : "image_url"}
@@ -487,7 +486,7 @@ class DocxImager {
 
     __validateDocx(){
         if(!this.zip){
-            throw new Error('Invalid docx path or format. Please reinitialise instance.')
+            throw new Error('Invalid docx path or format. Please load docx.')
         }
     }
 
