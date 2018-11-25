@@ -51,7 +51,7 @@ class DocxImager {
                 buffer.push(d);
             });
             res.on('end', ()=>{
-                fs.writeFileSync('t1.png', );
+                fs.writeFileSync('t1.'+type, );
                 this.__replaceImage(Buffer.concat(buffer), image_id, type, cbk);
             });
         });
