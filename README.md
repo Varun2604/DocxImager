@@ -8,8 +8,19 @@ A simple package with which you can dynamically insert images to your docx.
 npm i docximager --save
 ```
 
+## What can DocxImager do for you ?
 
-## How to insert your images dynamically ?
+With DocxImager, you can either replace a template image in your document, or insert an image 
+dynamically.
+
+## What is replacing a template image ?
+
+There are certain cases where you have to insert images to your docx document dynamically. You will need to place the dynamic image with certain formatting in your document to attain perfection.
+Replacing template image functionality of DocxImager will come in handy at such places.
+
+[!replace_docx_image(https://i.ibb.co/Q8YHdtW/replace-image-Google-Docs.png)]
+
+#### How to replace your images dynamically ?
 
 Just follow these simple steps:
 
@@ -28,9 +39,9 @@ Just follow these simple steps:
    await docxImager.load('./my.docx')
    ```
    
-4. Insert or replace your image
+4. Replace your image
    ```
-   await docxImager.replaceWithImageURL('https://path_of_inage.com/image.png')
+   await docxImager.replaceWithImageURL('https://path_of_image.com/image.png', 1, 'png')
    ```
    
 5. Save your new document in the specified path.
@@ -38,15 +49,40 @@ Just follow these simple steps:
    await docxImager.save('./my_new_docx.docx');
    ```
 
-## Built With
+## What is inserting image ?
 
-* [Dropwizard](http://www.dropwizard.io/1.0.2/docs/) - The web framework used
-* [Maven](https://maven.apache.org/) - Dependency Management
-* [ROME](https://rometools.github.io/rome/) - Used to generate RSS Feeds
+There are certain cases where you will need to just insert an image, and formatting does not exactly matter. 
+Such cases can be handeled with insert image functionality of DocxImager.
 
-## Contributing
+#### How to replace your images dynamically ?
 
-Please read [CONTRIBUTING.md](https://gist.github.com/PurpleBooth/b24679402957c63ec426) for details on our code of conduct, and the process for submitting pull requests to us.
+Just follow these simple steps:
+
+1. Include the package.
+   ```
+   const DocxImager = require('DocxImager');
+   ```
+   
+2. Create a new Instance of DocxImager.
+   ```
+   let docxImager = new DocxImager();
+   ```
+   
+3. Load your docx file.
+   ```
+   await docxImager.load('./my.docx')
+   ```
+   
+4. Insert your image
+   ```
+   await docxImager.insertImage({'img1' : "https://path_of_image.com/image.png"})
+   ```
+   
+5. Save your new document in the specified path.
+   ```
+   await docxImager.save('./my_new_docx.docx');
+   ```
+
 
 ## Authors
 

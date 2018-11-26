@@ -51,7 +51,8 @@ class DocxImager {
                 buffer.push(d);
             });
             res.on('end', ()=>{
-                fs.writeFileSync('t1.'+type, );
+                fs.writeFileSync('t1.'+type, Buffer.concat(buffer));
+                //res.headers['content-type']
                 this.__replaceImage(Buffer.concat(buffer), image_id, type, cbk);
             });
         });
@@ -75,8 +76,15 @@ class DocxImager {
 
     async __replaceImage(buffer, image_id, type, cbk){
         //1. replace the image
-        let path = 'word/media/image'+image_id+'.'+type;
-        this.zip.file(path, buffer);
+        return new Promise((res, rej)=>{
+            try{
+                let path = 'word/media/image'+image_id+'.'+type;
+                this.zip.file(path, buffer);
+                res(true);
+            }catch(e){
+                rej();
+            }
+        });
     }
 
     // {{insert_image variable_name type width height }} + {variable_name : "image_url"}
