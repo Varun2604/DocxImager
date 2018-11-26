@@ -18,7 +18,7 @@ dynamically.
 There are certain cases where you have to insert images to your docx document dynamically. You will need to place the dynamic image with certain formatting in your document to attain perfection.
 Replacing template image functionality of DocxImager will come in handy at such places.
 
-[!replace_docx_image](https://i.ibb.co/Q8YHdtW/replace-image-Google-Docs.png)
+![replace_docx_image](https://i.ibb.co/Q8YHdtW/replace-image-Google-Docs.png)
 
 #### How to replace your images dynamically ?
 
