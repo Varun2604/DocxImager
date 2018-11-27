@@ -28,10 +28,20 @@ const REL_ID = 'rel_id';
 
 class DocxImager {
 
+    /**
+     * Represents a DocxImager instance
+     * @constructor
+     */
+
     constructor(){
         this.zip = null;
     }
 
+    /**
+     * Load the DocxImager instance with the docx.
+     * @param {String} docx_path full path of the template docx
+     * @returns {Promise}
+     */
     async load(docx_path){
         return  this.__loadDocx(docx_path).catch((e)=>{
             console.log(e);
@@ -43,6 +53,13 @@ class DocxImager {
         this.zip = await zip.loadAsync(fs.readFileSync(docx_path));
     }
 
+    /**
+     * Replaces the template image with the image obtained from the web url
+     * @param {String} image_uri web uri of the image
+     * @param {String} image_id id of the image in the docx
+     * @param {String} type type of the template image
+     * @returns {Promise}
+     */
     replaceWithImageURL(image_uri, image_id, type, cbk){
         this.__validateDocx();
         let req3 = https.request(image_uri, (res) => {
@@ -63,12 +80,26 @@ class DocxImager {
         req3.end();
     }
 
+    /**
+     * Replaces the template image with the image obtained from the local path
+     * @param {String} image_path full path of the image in the local system
+     * @param {String} image_id id of the image in the docx
+     * @param {String} type type of the template image
+     * @returns {Promise}
+     */
     replaceWithLocalImage(image_path, image_id, type, cbk){
         this.__validateDocx();
         let image_buffer = fs.readFileSync(image_path);
         this.__replaceImage(image_buffer, image_id, type, cbk);
     }
 
+    /**
+     * Replaces the template image with the image obtained from the Base64 string
+     * @param {String} base64_string Base64 form of the image
+     * @param {String} image_id id of the image in the docx
+     * @param {String} type type of the template image
+     * @returns {Promise}
+     */
     replaceWithB64Image(base64_string, image_id, type, cbk){
         this.__validateDocx();
         this.__replaceImage(Buffer.from(base64_string, 'base64'), image_id, type, cbk);
@@ -128,6 +159,11 @@ class DocxImager {
 
     }
 
+    /**
+     * Saves the transformed docx.
+     * @param {String} op_file_name Output file name with full path.
+     * @returns {Promise}
+     */
     async save(op_file_name){
         if(!op_file_name){
             op_file_name = './merged.docx';
