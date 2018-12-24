@@ -86,6 +86,9 @@ Just follow these simple steps:
    await docxImager.save('./my_new_docx.docx');
    ```
 
+## Documentation
+
+[Docs](https://varun2604.github.io/DocxImager/)
 
 ## Authors
 
