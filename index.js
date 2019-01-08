@@ -11,8 +11,8 @@ const IMAGE_URI = 'http://schemas.openxmlformats.org/officeDocument/2006/relatio
 const IMAGE_TYPE = 'image/png';
 
 const IMAGE_RETRIEVAL_TYPE = {
-   'URL' : 'url',
-   'LOCAL' : 'local',
+    'URL' : 'url',
+    'LOCAL' : 'local',
     'B64' : 'b64'
 };
 
@@ -40,18 +40,22 @@ class DocxImager {
 
     /**
      * Load the DocxImager instance with the docx.
-     * @param {String} docx_path full path of the template docx
+     * @param {String} path_or_buffer full path of the template docx, or the buffer
      * @returns {Promise}
      */
-    async load(docx_path){
-        return  this.__loadDocx(docx_path).catch((e)=>{
+    async load(path_or_buffer){
+        return  this.__loadDocx(path_or_buffer).catch((e)=>{
             console.log(e);
         });
     }
 
-    async __loadDocx(docx_path){
+    async __loadDocx(path_or_buffer){
         let zip = new JSZip();
-        this.zip = await zip.loadAsync(fs.readFileSync(docx_path));
+        let buffer = path_or_buffer;
+        if(!Buffer.isBuffer(path_or_buffer)){
+            buffer = fs.readFileSync(path_or_buffer);
+        }
+        this.zip = await zip.loadAsync(buffer);
     }
 
     /**
@@ -150,11 +154,6 @@ class DocxImager {
         //4. insert in document.xml after calculating EMU.
         await this._addInDocumentXML(final_context);
 
-        // this.zip.generateNodeStream({streamFiles : true})
-        //     .pipe(fs.createWriteStream('./merged.docx'))
-        //     .on('finish', function(x){
-        //         callback();
-        //     });
         // http://polymathprogrammer.com/2009/10/22/english-metric-units-and-open-xml/
         // https://startbigthinksmall.wordpress.com/2010/01/04/points-inches-and-emus-measuring-units-in-office-open-xml/
 
@@ -358,18 +357,27 @@ class DocxImager {
 
                 content = DocxImager.__cleanXML(content);
                 let matches = content.match(/(<w:r>.*?insert_image.*?<\/w:r>)/g);         //match all runs in p tags containing
-                //TODO iterate through all matches to match more than one tag
-                if(matches && matches[0]){
-                    let tag = matches[0].match(/{{(.*?)}}/g)[0];
-                    let splits = tag.split(' ');
-                    let var_name = splits[1];
-                    let width = splits[2];
-                    let height = splits[3];
 
-                    let obj = final_context[var_name];
-                    let xml = DocxImager.__getImgXMLElement(obj[REL_ID], height, width);
+                if(matches && matches.length > 0){
+                    for(let i = 0; i < matches.length; i++){
+                        let xml = matches[i];
+                        let regex = new RegExp(/{{(.*?)}}/g);
+                        let tag = regex.exec(xml);
+                        while(tag){
+                            tag = tag[0];
+                            let splits = tag.split(' ');
+                            let var_name = splits[1];
+                            let width = splits[2];
+                            let height = splits[3];
 
-                    content = content.replace(matches[0], xml);
+                            let obj = final_context[var_name];
+                            // let xml = DocxImager.__getImgXMLElement(obj[REL_ID], height, width);
+
+                            xml = xml.replace(tag, '</w:t></w:r>'+DocxImager.__getImgXMLElement(obj[REL_ID], height, width)+'<w:r><w:t>');
+                            tag = regex.exec(xml);
+                        }
+                        content = content.replace(matches[i], xml);
+                    }
                     this.zip.file('word/document.xml', content);
                     res(true);
                 }else{
@@ -417,8 +425,9 @@ class DocxImager {
     }
 
     static __getImgXMLElement(rId, height, width){
-        let calc_height = 951710;//9525 * height;
-        let calc_width = 2855130;//9525 * width;
+        // width and height calculated assuming resolution as 96 dpi
+        let calc_height = /*(9525 * height)*/2857500;
+        let calc_width = /*(9525 * width)*/2857500;
 
         // from web merge
        return '<w:r>'+
@@ -535,42 +544,7 @@ class DocxImager {
         }
     }
 
-    //idml functi8on
-
-    async merge(idml_path, context, merged_file_path){
-        return new Promise(async (res, rej)=>{
-
-            let zip = await zip.loadAsync(fs.readFileSync(idml_path));
-
-            //get all the file names that are to be merged.
-            let des_map = await zip.file('designmap.xml').async('nodebuffer').toString();
-
-            let regex = new RegExp(/<idPkg:Story src="(.*?)".?\/>/gm);
-            let m = regex.exec(des_map);
-            let rels = [];
-            while(m != null){
-                rels.push(m[1]);
-                m = regex.exec(des_map);
-            }
-            if(rels && rels.length > 0){
-                for(let i = 0; i < rels.length; i++){
-                    let content = await zip.file(rels[i]).async('nodebuffer').toString();
-                    content = Handlebars.compile(content)(context);
-                    zip.file(rels[i], content);
-                }
-
-                zip.generateNodeStream({streamFiles : true})
-                    .pipe(fs.createWriteStream(merged_file_path))
-                    .on('finish', function(x){
-                        res(true);
-                    });
-            }else{
-                rej(new Error('IDML file does not contain any story file'));
-            }
-
-        });
-    }
 }
 
 
-module.exports = DocxImager;
+module.exports = {DocxImager};
